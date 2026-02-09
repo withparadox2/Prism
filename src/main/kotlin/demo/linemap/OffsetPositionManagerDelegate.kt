@@ -6,7 +6,9 @@ import com.intellij.debugger.requests.ClassPrepareRequestor
 import com.sun.jdi.Location
 import com.sun.jdi.ReferenceType
 import com.sun.jdi.request.ClassPrepareRequest
+import com.intellij.openapi.diagnostic.Logger
 
+val LOG = Logger.getInstance("Demo.LineMapper")
 
 class OffsetPositionManagerDelegate(private val delegate: PositionManager) : PositionManager {
     private val OFFSET = 52
