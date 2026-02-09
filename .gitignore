@@ -1,0 +1,24 @@
+# ===== IntelliJ IDEA =====
+.idea/
+*.iml
+out/
+
+# ===== Gradle =====
+.gradle/
+build/
+
+# Gradle wrapper（通常需要提交 wrapper，所以不忽略 gradle/ 和 gradlew）
+# 如果你确定不想提交 wrapper，可取消下面两行注释
+# gradle/
+# gradlew
+# gradlew.bat
+
+# ===== Local config =====
+local.properties
+
+# ===== OS / Editor =====
+.DS_Store
+Thumbs.db
+
+# ===== Logs =====
+*.log

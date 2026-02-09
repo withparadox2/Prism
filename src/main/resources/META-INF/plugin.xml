@@ -1,0 +1,19 @@
+<idea-plugin>
+    <id>demo.linemap</id>
+    <name>Debug Line Mapper (Demo)</name>
+    <vendor email="demo@example.com">demo</vendor>
+    <!--    <extensions defaultExtensionNs="com.intellij">-->
+    <!--        <projectService serviceImplementation="demo.linemap.DebugSessionInitializer"/>-->
+    <!--    </extensions>-->
+<!--        <extensions defaultExtensionNs="com.intellij">-->
+<!--            <postStartupActivity implementation="demo.linemap.PluginStartupActivity"/>-->
+<!--        </extensions>-->
+
+    <extensions defaultExtensionNs="com.intellij">
+        <debugger.positionManagerFactory implementation="demo.linemap.FrameworkOffsetFactory"
+            order="first" />
+    </extensions>
+    <depends>com.intellij.modules.xdebugger</depends>
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.java</depends>
+</idea-plugin>
