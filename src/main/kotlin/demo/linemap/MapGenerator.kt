@@ -1,5 +1,14 @@
 package demo.linemap
 
+import com.intellij.psi.JavaRecursiveElementVisitor
+import com.intellij.psi.PsiArrayType
+import com.intellij.psi.PsiDocumentManager
+import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiMethod
+import com.intellij.psi.PsiPrimitiveType
+import com.intellij.psi.PsiStatement
+import com.intellij.psi.PsiType
+import com.intellij.psi.util.PsiTreeUtil
 import org.jf.dexlib2.DexFileFactory
 import org.jf.dexlib2.Opcodes
 import org.jf.dexlib2.iface.ClassDef
@@ -19,24 +28,24 @@ class DexParser {
 
     fun getMethodMap(
         className: String,
-        sourceJarPath: String,
+        psiFile: PsiFile,
         runtimeJarPath: String
     ): Map<String, MethodMapping>? {
         if (!map.containsKey(className)) {
-            map[className] = calculateOffsets(className, sourceJarPath, runtimeJarPath)
+            map[className] = calculateOffsets(className, psiFile, runtimeJarPath)
         }
         return map[className]
     }
 
     private fun calculateOffsets(
         className: String,
-        sourceJarPath: String,
+        psiFile: PsiFile,
         runtimeJarPath: String
     ): Map<String, MethodMapping> {
         val resultMap = mutableMapOf<String, MethodMapping>()
         println("call calculateOffsets source")
         // 1. 获取模拟器（Source）端的行号范围：Map<MethodKey, Pair<Start, End>>
-        val sourceMap = getMethodStartLinesFromJar(sourceJarPath, className)
+        val sourceMap = generateMethodLineMap(psiFile)
 
         println("call calculateOffsets runtime")
         // 2. 获取手机（Runtime）端的起始行：Map<MethodKey, Pair<Start, End>>
@@ -51,9 +60,7 @@ class DexParser {
             if (runtimeRange != null) {
                 resultMap[methodKey] = MethodMapping(sourceRange.first, sourceRange.second, runtimeRange.first, runtimeRange.second)
             } else {
-                // 如果手机端没这个方法，可以标记为 0 偏移或记录错误
                 System.err.println("Method $methodKey not found in runtime JAR")
-                resultMap[methodKey] = MethodMapping(sourceRange.first, sourceRange.second, 0, 0)
             }
         }
 
@@ -105,6 +112,9 @@ class DexParser {
     ) {
         for (method in classDef.methods) {
             val methodKey: String = method.name + method.parameters.toString()
+            if (methodKey == "loop[]") {
+                LOG.info("gsd-gsd parse loop")
+            }
             if (method.implementation != null && methodKey != "<clinit>[]") {
                 var start = -1
                 var end = -1
@@ -112,12 +122,73 @@ class DexParser {
                     if (item is LineNumber) {
                         val currentLine = item.lineNumber
                         if (start == -1) start = currentLine
-                        end = currentLine // 不断更新，最后一次就是结束行
+                        end = end.coerceAtLeast(currentLine)
                     }
                 }
                 if (start != -1) {
                     methodMap[methodKey] = start to end
                 }
+            }
+        }
+    }
+
+    fun generateMethodLineMap(psiFile: PsiFile): Map<String, Pair<Int, Int>> {
+        val methodMap = mutableMapOf<String, Pair<Int, Int>>()
+        val project = psiFile.project
+        val document = PsiDocumentManager.getInstance(project).getDocument(psiFile) ?: return methodMap
+
+        // 使用访问者模式遍历所有方法节点
+        psiFile.accept(object : JavaRecursiveElementVisitor() {
+            override fun visitMethod(method: PsiMethod) {
+                super.visitMethod(method)
+                val paramsList = method.parameterList.parameters.joinToString(", ") { param ->
+                    getDexCompatibleTypeName(param.type)
+                }
+
+                val methodKey = "${method.name}[$paramsList]"
+
+                // 过滤掉静态构造
+                if (method.name != "<clinit>") {
+                    // 寻找方法体内第一个真正的语句（Statement）
+                    val firstStatement = PsiTreeUtil.getChildOfType(method.body, PsiStatement::class.java)
+                    val startOffset = firstStatement?.textRange?.startOffset ?: method.nameIdentifier?.textRange?.startOffset ?: method.textRange.startOffset
+                    val startLine = document.getLineNumber(startOffset) + 1
+                    val endLine = document.getLineNumber(method.textRange.endOffset) + 1
+                    methodMap[methodKey] = startLine to endLine
+                }
+            }
+        })
+
+        return methodMap
+    }
+
+    private val primitiveMapping = mapOf(
+        "boolean" to "Z",
+        "byte"    to "B",
+        "char"    to "C",
+        "short"   to "S",
+        "int"     to "I",
+        "long"    to "J",
+        "float"   to "F",
+        "double"  to "D",
+        "void"    to "V"
+    )
+
+    private fun getDexCompatibleTypeName(type: PsiType): String {
+        return when (type) {
+            is PsiPrimitiveType -> {
+                // boolean -> Z, int -> I
+                primitiveMapping[type.canonicalText] ?: type.canonicalText
+            }
+            is PsiArrayType -> {
+                // 数组在 Dex 中是以 [ 开头的，例如 int[] -> [I
+                "[" + getDexCompatibleTypeName(type.componentType)
+            }
+            else -> {
+                // 引用类型转换为 Landroid/view/View; 格式
+                // 1. 去掉泛型 2. 点换成斜杠 3. 前缀 L 后缀 ;
+                val rawName = type.canonicalText.split("<")[0]
+                "L${rawName.replace(".", "/")};"
             }
         }
     }
@@ -129,11 +200,11 @@ fun main() {
     val sourceJar = "/Users/bytedance/Desktop/xiaomi_framework.jar"
     val runtimeJar = "/Users/bytedance/Desktop/runtime_framework.jar"
 
-    println("开始解析...")
-    val mapping = parser.getMethodMap(className, sourceJar, runtimeJar)
-    mapping?.forEach { (method, info) ->
-        println("方法: $method")
-        println("  source: ${info.sourceStart} -> ${info.sourceEnd}")
-        println("  runtime: ${info.runtimeStart} -> ${info.runtimeEnd}")
-    }
+//    println("开始解析...")
+//    val mapping = parser.getMethodMap(className, sourceJar, runtimeJar)
+//    mapping?.forEach { (method, info) ->
+//        println("方法: $method")
+//        println("  source: ${info.sourceStart} -> ${info.sourceEnd}")
+//        println("  runtime: ${info.runtimeStart} -> ${info.runtimeEnd}")
+//    }
 }
