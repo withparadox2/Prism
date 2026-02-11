@@ -1,5 +1,6 @@
 package demo.linemap
 
+import com.intellij.openapi.application.runReadAction
 import com.intellij.psi.JavaRecursiveElementVisitor
 import com.intellij.psi.PsiArrayType
 import com.intellij.psi.PsiDocumentManager
@@ -132,34 +133,35 @@ class DexParser {
         }
     }
 
-    fun generateMethodLineMap(psiFile: PsiFile): Map<String, Pair<Int, Int>> {
-        val methodMap = mutableMapOf<String, Pair<Int, Int>>()
-        val project = psiFile.project
-        val document = PsiDocumentManager.getInstance(project).getDocument(psiFile) ?: return methodMap
+    private fun generateMethodLineMap(psiFile: PsiFile): Map<String, Pair<Int, Int>> {
+        return runReadAction {
+            val methodMap = mutableMapOf<String, Pair<Int, Int>>()
+            val project = psiFile.project
+            val document = PsiDocumentManager.getInstance(project).getDocument(psiFile) ?: return@runReadAction methodMap
 
-        // 使用访问者模式遍历所有方法节点
-        psiFile.accept(object : JavaRecursiveElementVisitor() {
-            override fun visitMethod(method: PsiMethod) {
-                super.visitMethod(method)
-                val paramsList = method.parameterList.parameters.joinToString(", ") { param ->
-                    getDexCompatibleTypeName(param.type)
+            // 使用访问者模式遍历所有方法节点
+            psiFile.accept(object : JavaRecursiveElementVisitor() {
+                override fun visitMethod(method: PsiMethod) {
+                    super.visitMethod(method)
+                    val paramsList = method.parameterList.parameters.joinToString(", ") { param ->
+                        getDexCompatibleTypeName(param.type)
+                    }
+
+                    val methodKey = "${method.name}[$paramsList]"
+
+                    // 过滤掉静态构造
+                    if (method.name != "<clinit>") {
+                        // 寻找方法体内第一个真正的语句（Statement）
+                        val firstStatement = PsiTreeUtil.getChildOfType(method.body, PsiStatement::class.java)
+                        val startOffset = firstStatement?.textRange?.startOffset ?: method.nameIdentifier?.textRange?.startOffset ?: method.textRange.startOffset
+                        val startLine = document.getLineNumber(startOffset) + 1
+                        val endLine = document.getLineNumber(method.textRange.endOffset) + 1
+                        methodMap[methodKey] = startLine to endLine
+                    }
                 }
-
-                val methodKey = "${method.name}[$paramsList]"
-
-                // 过滤掉静态构造
-                if (method.name != "<clinit>") {
-                    // 寻找方法体内第一个真正的语句（Statement）
-                    val firstStatement = PsiTreeUtil.getChildOfType(method.body, PsiStatement::class.java)
-                    val startOffset = firstStatement?.textRange?.startOffset ?: method.nameIdentifier?.textRange?.startOffset ?: method.textRange.startOffset
-                    val startLine = document.getLineNumber(startOffset) + 1
-                    val endLine = document.getLineNumber(method.textRange.endOffset) + 1
-                    methodMap[methodKey] = startLine to endLine
-                }
-            }
-        })
-
-        return methodMap
+            })
+            methodMap
+        }
     }
 
     private val primitiveMapping = mapOf(

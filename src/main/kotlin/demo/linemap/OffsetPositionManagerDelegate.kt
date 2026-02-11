@@ -1,8 +1,10 @@
 package demo.linemap
 
-import com.intellij.debugger.PositionManager
+import com.intellij.debugger.MultiRequestPositionManager
 import com.intellij.debugger.SourcePosition
+import com.intellij.debugger.engine.PositionManagerImpl
 import com.intellij.debugger.requests.ClassPrepareRequestor
+import com.intellij.openapi.application.runReadAction
 import com.sun.jdi.Location
 import com.sun.jdi.ReferenceType
 import com.sun.jdi.request.ClassPrepareRequest
@@ -12,7 +14,8 @@ import com.intellij.psi.PsiJavaFile
 
 val LOG = Logger.getInstance("Demo.LineMapper")
 
-class OffsetPositionManagerDelegate(private val delegate: PositionManager) : PositionManager {
+class OffsetPositionManagerDelegate(private val delegate: PositionManagerImpl) :
+    MultiRequestPositionManager {
 
     init {
         LOG.info("gsd-gsd call init OffsetPositionManagerDelegate")
@@ -20,9 +23,6 @@ class OffsetPositionManagerDelegate(private val delegate: PositionManager) : Pos
 
     override fun locationsOfLine(type: ReferenceType, position: SourcePosition): List<Location> {
         val offset = sourceToRuntimeOffset(position)
-//        val className = getFullClassName(position.file)
-//        val sourceMap = DexParser().generateMethodLineMap(position.file)
-        // 当你要下断点时：把 IDE 的源码行号 A 变成 A + 10 传给底层
         val offsetPos = SourcePosition.createFromLine(position.file, position.line + offset)
         val locations = delegate.locationsOfLine(type, offsetPos)
         LOG.info("gsd-gsd call locationsOfLine from OffsetPositionManagerDelegate, type=${type}, position=${position}, offsetPos=${offsetPos}, locations=${locations}")
@@ -39,29 +39,37 @@ class OffsetPositionManagerDelegate(private val delegate: PositionManager) : Pos
     }
 
     override fun getAllClasses(position: SourcePosition): List<ReferenceType> {
-//        val offsetPos = SourcePosition.createFromLine(position.file, position.line)
-//        val className = getFullClassName(position.file)
-//        val sourceMap = DexParser().generateMethodLineMap(position.file)
-        val classes = delegate.getAllClasses(position)
-//        LOG.info("gsd-gsd call getAllClasses from OffsetPositionManagerDelegate, position=${position}, offsetPos=${offsetPos}, classes=${classes}")
-        return classes
+        return delegate.getAllClasses(position)
     }
 
     override fun createPrepareRequest(
         requestor: ClassPrepareRequestor,
         position: SourcePosition
     ): ClassPrepareRequest? {
-//        val className = getFullClassName(position.file)
-//        val sourceMap = DexParser().generateMethodLineMap(position.file)
-        val offsetPos = SourcePosition.createFromLine(position.file, position.line + sourceToRuntimeOffset(position))
-        val request = delegate.createPrepareRequest(requestor, offsetPos)
-        LOG.info("gsd-gsd call createPrepareRequest from OffsetPositionManagerDelegate, requestor=${requestor}, position=${position}, offsetPos=${offsetPos}, request=${request}")
-        return request
+        val offsetPos = SourcePosition.createFromLine(
+            position.file,
+            position.line + sourceToRuntimeOffset(position)
+        )
+        return delegate.createPrepareRequest(requestor, offsetPos)
+    }
+
+    override fun createPrepareRequests(
+        requestor: ClassPrepareRequestor,
+        position: SourcePosition
+    ): MutableList<ClassPrepareRequest> {
+        val offsetPos = SourcePosition.createFromLine(
+            position.file,
+            position.line + sourceToRuntimeOffset(position)
+        )
+        return delegate.createPrepareRequests(requestor, offsetPos)
     }
 
     private var cachedMap: MutableMap<String, Map<String, MethodMapping>> = mutableMapOf()
     private fun getMethodMap(psiFile: PsiFile): Map<String, MethodMapping>? {
         val className = getFullClassName(psiFile) ?: return null
+        if (!className.startsWith("android")) {
+            return null
+        }
         val methodMap = cachedMap[className]
         if (methodMap != null) {
             return methodMap
@@ -73,17 +81,9 @@ class OffsetPositionManagerDelegate(private val delegate: PositionManager) : Pos
     }
 
     private fun getFullClassName(psiFile: PsiFile): String? {
-        // 1. 确保它是 Java 文件
-        if (psiFile is PsiJavaFile) {
-            // 2. 获取文件中的所有类 (Top-level classes)
-            val classes = psiFile.classes
-            if (classes.isNotEmpty()) {
-                // 3. 返回第一个类的全限定名 (包含包名)
-                // 例如: android.view.View
-                return classes[0].qualifiedName
-            }
+        return runReadAction {
+            (psiFile as? PsiJavaFile)?.classes?.firstOrNull()?.qualifiedName
         }
-        return null
     }
 
     private fun sourceToRuntimeOffset(position: SourcePosition): Int {

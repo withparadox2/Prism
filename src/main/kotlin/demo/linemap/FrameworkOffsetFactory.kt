@@ -10,8 +10,7 @@ class FrameworkOffsetFactory : PositionManagerFactory() {
     override fun createPositionManager(process: DebugProcess): PositionManager? {
         LOG.info("gsd-gsd call createPositionManager from FrameworkOffsetFactory process=${process}")
         if (process is DebugProcessImpl) {
-            val defaultManager: PositionManager = PositionManagerImpl(process)
-            return OffsetPositionManagerDelegate(defaultManager)
+            return OffsetPositionManagerDelegate(PositionManagerImpl(process))
         }
         return null
     }
