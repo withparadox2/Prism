@@ -1,4 +1,4 @@
-package demo.linemap
+package com.bytedance.idea.plugin.prism
 
 import com.intellij.debugger.MultiRequestPositionManager
 import com.intellij.debugger.SourcePosition
@@ -9,12 +9,16 @@ import com.sun.jdi.Location
 import com.sun.jdi.ReferenceType
 import com.sun.jdi.request.ClassPrepareRequest
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.guessProjectDir
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiJavaFile
+import java.io.File
+import java.util.Properties
 
-val LOG = Logger.getInstance("Demo.LineMapper")
+val LOG = Logger.getInstance("Prism")
 
-class OffsetPositionManagerDelegate(private val delegate: PositionManagerImpl) :
+class PrismPositionManager(private val delegate: PositionManagerImpl) :
     MultiRequestPositionManager {
 
     init {
@@ -64,8 +68,8 @@ class OffsetPositionManagerDelegate(private val delegate: PositionManagerImpl) :
         return delegate.createPrepareRequests(requestor, offsetPos)
     }
 
-    private var cachedMap: MutableMap<String, Map<String, MethodMapping>> = mutableMapOf()
-    private fun getMethodMap(psiFile: PsiFile): Map<String, MethodMapping>? {
+    private var cachedMap: MutableMap<String, Map<String, MethodLineInfo>> = mutableMapOf()
+    private fun getMethodMap(psiFile: PsiFile): Map<String, MethodLineInfo>? {
         val className = getFullClassName(psiFile) ?: return null
         if (!className.startsWith("android")) {
             return null
@@ -74,8 +78,8 @@ class OffsetPositionManagerDelegate(private val delegate: PositionManagerImpl) :
         if (methodMap != null) {
             return methodMap
         }
-        val runtimeJar = "/Users/bytedance/Desktop/xiaomi_framework.jar"
-        return DexParser().getMethodMap(className, psiFile, runtimeJar)?.also {
+        val runtimeJar = LocalPropertiesProvider.getFrameworkJarPath(psiFile.project) ?: return null
+        return LineMapGenerateHelper.getMethodLineInfoMap(className, psiFile, runtimeJar).also {
             cachedMap[className] = it
         }
     }
@@ -104,5 +108,22 @@ class OffsetPositionManagerDelegate(private val delegate: PositionManagerImpl) :
             }
         }
         return 0
+    }
+}
+
+object LocalPropertiesProvider {
+    private const val KEY_FRAMEWORK_JAR = "prism.framework.jar.path"
+    fun getFrameworkJarPath(project: Project): String? {
+        val projectDir = project.guessProjectDir() ?: return null
+
+        val localPropertiesFile = File(projectDir.path, "local.properties")
+        if (!localPropertiesFile.exists()) return null
+        return try {
+            val properties = Properties()
+            localPropertiesFile.inputStream().use { properties.load(it) }
+            properties.getProperty(KEY_FRAMEWORK_JAR)
+        } catch (e: Exception) {
+            null
+        }
     }
 }

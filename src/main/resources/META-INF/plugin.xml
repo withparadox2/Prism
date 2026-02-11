@@ -1,9 +1,9 @@
 <idea-plugin>
-    <id>demo.linemap</id>
-    <name>Debug Line Mapper (Demo)</name>
-    <vendor email="demo@example.com">demo</vendor>
+    <id>com.bytedance.idea.plugin.prism</id>
+    <name>Prism</name>
+    <vendor email="guishidan@bytedance.com">Bytedance</vendor>
     <extensions defaultExtensionNs="com.intellij">
-        <debugger.positionManagerFactory implementation="demo.linemap.FrameworkOffsetFactory"
+        <debugger.positionManagerFactory implementation="com.bytedance.idea.plugin.prism.PrismPositionManagerFactory"
             order="first" />
     </extensions>
     <depends>com.intellij.modules.xdebugger</depends>

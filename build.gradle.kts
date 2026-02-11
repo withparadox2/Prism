@@ -3,7 +3,7 @@ plugins {
     id("org.jetbrains.intellij") version "1.17.3"
 }
 
-group = "demo.linemap"
+group = "com.bytedance.idea.plugin.prism"
 version = "0.1.0"
 
 repositories {

@@ -1,1 +1,1 @@
-rootProject.name = "android-debug-line-mapper"
+rootProject.name = "prism"
