@@ -17,9 +17,9 @@ dependencies {
 }
 
 intellij {
-    type.set("IC") // Android Studio 基于 IntelliJ Community
-    version.set("2022.2")
-    plugins.set(listOf("android", "com.intellij.java"))
+    type.set("IC")
+    version.set("2024.1.4")
+    plugins.set(listOf("com.intellij.java"))
 }
 
 tasks {
