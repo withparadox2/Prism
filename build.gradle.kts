@@ -17,9 +17,12 @@ dependencies {
 }
 
 intellij {
-    type.set("IC")
-    version.set("2024.1.4")
-    plugins.set(listOf("com.intellij.java"))
+//    type.set("IC")
+//    version.set("2024.1.4")
+//    plugins.set(listOf("com.intellij.java"))
+
+    localPath.set("/Applications/Android Studio 2.app/Contents")
+    plugins.set(listOf("android","com.intellij.java"))
 }
 
 tasks {
