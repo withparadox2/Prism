@@ -9,27 +9,23 @@ import com.sun.jdi.Location
 import com.sun.jdi.ReferenceType
 import com.sun.jdi.request.ClassPrepareRequest
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.project.Project
-import com.intellij.openapi.project.guessProjectDir
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiJavaFile
-import java.io.File
-import java.util.Properties
 
-val LOG = Logger.getInstance("Prism")
+val LOG = Logger.getInstance("PrismLogger")
 
 class PrismPositionManager(private val delegate: PositionManagerImpl) :
     MultiRequestPositionManager {
 
     init {
-        LOG.info("gsd-gsd call init OffsetPositionManagerDelegate")
+        LOG.info("call init PrismPositionManager")
     }
 
     override fun locationsOfLine(type: ReferenceType, position: SourcePosition): List<Location> {
         val offset = sourceToRuntimeOffset(position)
         val offsetPos = SourcePosition.createFromLine(position.file, position.line + offset)
         val locations = delegate.locationsOfLine(type, offsetPos)
-        LOG.info("gsd-gsd call locationsOfLine from OffsetPositionManagerDelegate, type=${type}, position=${position}, offsetPos=${offsetPos}, locations=${locations}")
+        LOG.info("call locationsOfLine, type=${type}, position=${position}, offsetPos=${offsetPos}, locations=${locations}")
         return locations
     }
 
@@ -38,7 +34,7 @@ class PrismPositionManager(private val delegate: PositionManagerImpl) :
         val pos = delegate.getSourcePosition(location) ?: return null
         val offset = runtimeToSourceOffset(pos)
         val sourcePos = SourcePosition.createFromLine(pos.file, pos.line + offset)
-        LOG.info("gsd-gsd call getSourcePosition from OffsetPositionManagerDelegate, location=${location}, pos=${pos}, sourcePos=${sourcePos}")
+        LOG.info("call getSourcePosition, location=${location}, pos=${pos}, sourcePos=${sourcePos}")
         return sourcePos
     }
 
@@ -78,7 +74,7 @@ class PrismPositionManager(private val delegate: PositionManagerImpl) :
         if (methodMap != null) {
             return methodMap
         }
-        val runtimeJar = LocalPropertiesProvider.getFrameworkJarPath(psiFile.project) ?: return null
+        val runtimeJar =  PrismSettings.getInstance().frameworkJarPath
         return LineMapGenerateHelper.getMethodLineInfoMap(className, psiFile, runtimeJar).also {
             cachedMap[className] = it
         }
@@ -108,22 +104,5 @@ class PrismPositionManager(private val delegate: PositionManagerImpl) :
             }
         }
         return 0
-    }
-}
-
-object LocalPropertiesProvider {
-    private const val KEY_FRAMEWORK_JAR = "prism.framework.jar.path"
-    fun getFrameworkJarPath(project: Project): String? {
-        val projectDir = project.guessProjectDir() ?: return null
-
-        val localPropertiesFile = File(projectDir.path, "local.properties")
-        if (!localPropertiesFile.exists()) return null
-        return try {
-            val properties = Properties()
-            localPropertiesFile.inputStream().use { properties.load(it) }
-            properties.getProperty(KEY_FRAMEWORK_JAR)
-        } catch (e: Exception) {
-            null
-        }
     }
 }

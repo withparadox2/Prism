@@ -5,6 +5,14 @@
     <extensions defaultExtensionNs="com.intellij">
         <debugger.positionManagerFactory implementation="com.bytedance.idea.plugin.prism.PrismPositionManagerFactory"
             order="first" />
+        <applicationConfigurable
+            instance="com.bytedance.idea.plugin.prism.PrismConfigurable"
+            id="prism.settings"
+            displayName="Prism"/>
+        <notificationGroup
+            id="Prism"
+            displayType="BALLOON"
+            isLogByDefault="true"/>
     </extensions>
     <depends>com.intellij.modules.xdebugger</depends>
     <depends>com.intellij.modules.platform</depends>
