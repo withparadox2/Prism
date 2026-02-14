@@ -17,6 +17,9 @@ val LOG = Logger.getInstance("PrismLogger")
 class PrismPositionManager(private val delegate: PositionManagerImpl) :
     MultiRequestPositionManager {
 
+    private var cachedMap: MutableMap<String, Map<String, MethodLineInfo>> = mutableMapOf()
+    private val mapGenerateHelper = LineMapGenerateHelper()
+
     init {
         LOG.info("call init PrismPositionManager")
     }
@@ -64,7 +67,6 @@ class PrismPositionManager(private val delegate: PositionManagerImpl) :
         return delegate.createPrepareRequests(requestor, offsetPos)
     }
 
-    private var cachedMap: MutableMap<String, Map<String, MethodLineInfo>> = mutableMapOf()
     private fun getMethodMap(psiFile: PsiFile): Map<String, MethodLineInfo>? {
         val className = getFullClassName(psiFile) ?: return null
         if (!className.startsWith("android")) {
@@ -75,7 +77,7 @@ class PrismPositionManager(private val delegate: PositionManagerImpl) :
             return methodMap
         }
         val runtimeJar =  PrismSettings.getInstance().frameworkJarPath
-        return LineMapGenerateHelper.getMethodLineInfoMap(className, psiFile, runtimeJar).also {
+        return mapGenerateHelper.getMethodLineInfoMap(className, psiFile, runtimeJar).also {
             cachedMap[className] = it
         }
     }
