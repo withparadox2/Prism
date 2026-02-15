@@ -10,6 +10,7 @@ import com.intellij.debugger.engine.PositionManagerImpl
 import com.intellij.notification.Notification
 import com.intellij.notification.NotificationType
 import com.intellij.notification.Notifications
+import java.io.File
 
 class PrismPositionManagerFactory : PositionManagerFactory() {
 
@@ -32,6 +33,18 @@ class PrismPositionManagerFactory : PositionManagerFactory() {
             return null
         }
 
+        if (File(PrismSettings.getInstance().frameworkJarPath).exists().not()) {
+            Notifications.Bus.notify(
+                Notification(
+                    "Prism",
+                    "Framework.jar not exist",
+                    "Please check it in Settings > Prism",
+                    NotificationType.WARNING
+                )
+            )
+            return null
+        }
+
         val manager = PrismPositionManager(PositionManagerImpl(process as DebugProcessImpl))
 
         // 延迟执行插队逻辑，确保在所有 Manager 初始化完成后执行。将我们的 PositionManager 插入到列表的第一个位置。
@@ -40,6 +53,8 @@ class PrismPositionManagerFactory : PositionManagerFactory() {
                 reorderPositionManagers(process as DebugProcessImpl, manager)
             }
         })
+
+        LOG.info("createPositionManager create proxy position manager")
 
         return manager
     }

@@ -28,7 +28,7 @@ class PrismPositionManager(private val delegate: PositionManagerImpl) :
         val offset = sourceToRuntimeOffset(position)
         val offsetPos = SourcePosition.createFromLine(position.file, position.line + offset)
         val locations = delegate.locationsOfLine(type, offsetPos)
-        LOG.info("call locationsOfLine, type=${type}, position=${position}, offsetPos=${offsetPos}, locations=${locations}")
+        LOG.info("call locationsOfLine, type=${type.signature()}, position=${position}, offsetPos=${offsetPos}, locations=${locations}")
         return locations
     }
 
@@ -37,7 +37,7 @@ class PrismPositionManager(private val delegate: PositionManagerImpl) :
         val pos = delegate.getSourcePosition(location) ?: return null
         val offset = runtimeToSourceOffset(pos)
         val sourcePos = SourcePosition.createFromLine(pos.file, pos.line + offset)
-        LOG.info("call getSourcePosition, location=${location}, pos=${pos}, sourcePos=${sourcePos}")
+        LOG.info("call getSourcePosition, location=${location}, pos=${pos.file.name + ":" + pos.line}, sourcePos=${sourcePos}")
         return sourcePos
     }
 
