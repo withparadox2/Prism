@@ -84,11 +84,11 @@ class LineMapGenerateHelper {
             }
             // 遍历容器内所有的 dex 入口名称 (如 classes.dex, classes2.dex ...)
             for (entryName in container.dexEntryNames) {
-                val dexFile = container.getEntry(entryName) ?: continue
+                val dexEntry = container.getEntry(entryName) ?: continue
 
-                LOG.info("正在解析 Dex 入口: $entryName, 类数量: ${dexFile.classes.size}")
+                LOG.info("正在解析 Dex 入口: $entryName, 类数量: ${dexEntry.dexFile.classes.size}")
 
-                for (classDef in dexFile.classes) {
+                for (classDef in dexEntry.dexFile.classes) {
                     if (classDef.type == dexClassName) {
                         parseClassMethods(classDef, methodMap)
                         return methodMap
