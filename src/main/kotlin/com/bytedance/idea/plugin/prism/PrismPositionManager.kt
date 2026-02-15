@@ -69,7 +69,7 @@ class PrismPositionManager(private val delegate: PositionManagerImpl) :
 
     private fun getMethodMap(psiFile: PsiFile): Map<String, MethodLineInfo>? {
         val className = getFullClassName(psiFile) ?: return null
-        if (!className.startsWith("android")) {
+        if (!className.startsWith("android.")) {
             return null
         }
         val methodMap = cachedMap[className]
