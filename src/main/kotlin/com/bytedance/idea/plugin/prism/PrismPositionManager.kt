@@ -92,6 +92,7 @@ class PrismPositionManager(private val delegate: PositionManagerImpl) :
         val target = position.line + 1
         getMethodMap(position.file)?.forEach {
             if (target >= it.value.sourceStart && target <= it.value.sourceEnd) {
+                LOG.info("call sourceToRuntimeOffset file=${position.file} method=${it.key} info=${it.value}")
                 return it.value.runtimeStart - it.value.sourceStart
             }
         }
@@ -102,6 +103,7 @@ class PrismPositionManager(private val delegate: PositionManagerImpl) :
         val target = position.line + 1
         getMethodMap(position.file)?.forEach {
             if (target >= it.value.runtimeStart && target <= it.value.runtimeEnd) {
+                LOG.info("call runtimeToSourceOffset file=${position.file} method=${it.key} info=${it.value}")
                 return it.value.sourceStart - it.value.runtimeStart
             }
         }
