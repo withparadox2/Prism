@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>com.bytedance.idea.plugin.prism</id>
     <name>Prism</name>
-    <vendor email="guishidan@bytedance.com">Bytedance</vendor>
+    <vendor email="guishidan@bytedance.com" />
     <extensions defaultExtensionNs="com.intellij">
         <debugger.positionManagerFactory implementation="com.bytedance.idea.plugin.prism.PrismPositionManagerFactory"
             order="first" />
