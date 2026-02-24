@@ -1,14 +1,17 @@
 package com.bytedance.idea.plugin.prism
 
 import com.intellij.debugger.MultiRequestPositionManager
+import com.intellij.debugger.NoDataException
 import com.intellij.debugger.SourcePosition
 import com.intellij.debugger.engine.PositionManagerImpl
 import com.intellij.debugger.requests.ClassPrepareRequestor
+import com.intellij.ide.highlighter.JavaFileType
 import com.intellij.openapi.application.runReadAction
 import com.sun.jdi.Location
 import com.sun.jdi.ReferenceType
 import com.sun.jdi.request.ClassPrepareRequest
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.fileTypes.FileType
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiJavaFile
 
@@ -26,6 +29,12 @@ class PrismPositionManager(private val delegate: PositionManagerImpl) :
 
     override fun locationsOfLine(type: ReferenceType, position: SourcePosition): List<Location> {
         val offset = sourceToRuntimeOffset(position)
+        if (offset == null) {
+            if (shouldHandle(position.file)) {
+                LOG.info("call locationsOfLine, offset=null, type=${type.signature()}, position=${position}")
+            }
+            throw NoDataException.INSTANCE
+        }
         val offsetPos = SourcePosition.createFromLine(position.file, position.line + offset)
         val locations = delegate.locationsOfLine(type, offsetPos)
         LOG.info("call locationsOfLine, type=${type.signature()}, position=${position}, offsetPos=${offsetPos}, locations=${locations}")
@@ -33,43 +42,57 @@ class PrismPositionManager(private val delegate: PositionManagerImpl) :
     }
 
     override fun getSourcePosition(location: Location?): SourcePosition? {
-        // 当手机停住时：底层返回 B，我们把它变成 B - 10 给 IDE 显示
-        val pos = delegate.getSourcePosition(location) ?: return null
-        val offset = runtimeToSourceOffset(pos)
-        val sourcePos = SourcePosition.createFromLine(pos.file, pos.line + offset)
-        LOG.info("call getSourcePosition, location=${location}, pos=${pos.file.name + ":" + pos.line}, sourcePos=${sourcePos}")
+        val position = delegate.getSourcePosition(location) ?: throw NoDataException.INSTANCE
+        val offset = runtimeToSourceOffset(position)
+        if (offset == null) {
+            if (shouldHandle(position.file)) {
+                LOG.info("call getSourcePosition, offset=null, location=${location}, pos=${position.file.name + ":" + position.line}")
+            }
+            throw NoDataException.INSTANCE
+        }
+        val sourcePos = SourcePosition.createFromLine(position.file, position.line + offset)
+        LOG.info("call getSourcePosition, location=${location}, pos=${position.file.name + ":" + position.line}, sourcePos=${sourcePos}")
         return sourcePos
     }
 
+    override fun getAcceptedFileTypes(): MutableSet<out FileType>? {
+        return mutableSetOf(JavaFileType.INSTANCE)
+    }
+
     override fun getAllClasses(position: SourcePosition): List<ReferenceType> {
-        return delegate.getAllClasses(position)
+        return delegate.getAllClasses(position).takeIf { it.isNotEmpty() }
+            ?: throw NoDataException.INSTANCE
     }
 
     override fun createPrepareRequest(
         requestor: ClassPrepareRequestor,
         position: SourcePosition
     ): ClassPrepareRequest? {
+        val offset = sourceToRuntimeOffset(position) ?: throw NoDataException.INSTANCE
         val offsetPos = SourcePosition.createFromLine(
             position.file,
-            position.line + sourceToRuntimeOffset(position)
+            position.line + offset
         )
         return delegate.createPrepareRequest(requestor, offsetPos)
+            ?: throw NoDataException.INSTANCE
     }
 
     override fun createPrepareRequests(
         requestor: ClassPrepareRequestor,
         position: SourcePosition
     ): MutableList<ClassPrepareRequest> {
+        val offset = sourceToRuntimeOffset(position) ?: throw NoDataException.INSTANCE
         val offsetPos = SourcePosition.createFromLine(
             position.file,
-            position.line + sourceToRuntimeOffset(position)
+            position.line + offset
         )
-        return delegate.createPrepareRequests(requestor, offsetPos)
+        return delegate.createPrepareRequests(requestor, offsetPos).takeIf { it.isNotEmpty() }
+            ?: throw NoDataException.INSTANCE
     }
 
     private fun getMethodMap(psiFile: PsiFile): Map<String, MethodLineInfo>? {
         val className = getFullClassName(psiFile) ?: return null
-        if (!className.startsWith("android.")) {
+        if (!shouldHandle(psiFile)) {
             return null
         }
         val methodMap = cachedMap[className]
@@ -82,13 +105,17 @@ class PrismPositionManager(private val delegate: PositionManagerImpl) :
         }
     }
 
+    private fun shouldHandle(psiFile: PsiFile): Boolean {
+        return getFullClassName(psiFile)?.startsWith("android.") == true
+    }
+
     private fun getFullClassName(psiFile: PsiFile): String? {
         return runReadAction {
             (psiFile as? PsiJavaFile)?.classes?.firstOrNull()?.qualifiedName
         }
     }
 
-    private fun sourceToRuntimeOffset(position: SourcePosition): Int {
+    private fun sourceToRuntimeOffset(position: SourcePosition): Int? {
         val target = position.line + 1
         getMethodMap(position.file)?.forEach {
             if (target >= it.value.sourceStart && target <= it.value.sourceEnd) {
@@ -96,10 +123,10 @@ class PrismPositionManager(private val delegate: PositionManagerImpl) :
                 return it.value.runtimeStart - it.value.sourceStart
             }
         }
-        return 0
+        return null
     }
 
-    private fun runtimeToSourceOffset(position: SourcePosition): Int {
+    private fun runtimeToSourceOffset(position: SourcePosition): Int? {
         val target = position.line + 1
         getMethodMap(position.file)?.forEach {
             if (target >= it.value.runtimeStart && target <= it.value.runtimeEnd) {
@@ -107,6 +134,6 @@ class PrismPositionManager(private val delegate: PositionManagerImpl) :
                 return it.value.sourceStart - it.value.runtimeStart
             }
         }
-        return 0
+        return null
     }
 }
