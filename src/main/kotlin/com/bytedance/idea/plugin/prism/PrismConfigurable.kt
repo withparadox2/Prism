@@ -1,9 +1,13 @@
 package com.bytedance.idea.plugin.prism
 
+import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.ConfigurationException
+import com.intellij.openapi.project.ProjectManager
+import com.intellij.openapi.ui.TextComponentAccessor
+import com.intellij.openapi.ui.TextFieldWithBrowseButton
+import com.intellij.openapi.vfs.VirtualFile
 import java.awt.BorderLayout
-import java.awt.Dimension
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
@@ -13,16 +17,15 @@ import javax.swing.JCheckBox
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
-import javax.swing.JTextField
 
+@Suppress("DialogTitleCapitalization")
 class PrismConfigurable : Configurable {
 
     private val enableCheckbox = JCheckBox()
-    private val textField = JTextField()
+    private val pathField = TextFieldWithBrowseButton()
 
     init {
-        textField.columns = 30
-        textField.maximumSize = Dimension(Int.MAX_VALUE, 30)
+        pathField.textField.columns = 30
     }
 
     @Suppress("UseDPIAwareInsets")
@@ -38,7 +41,23 @@ class PrismConfigurable : Configurable {
 
         val settings = PrismSettings.getInstance()
         enableCheckbox.isSelected = settings.enabled
-        textField.text = settings.frameworkJarPath
+        pathField.text = settings.frameworkJarPath
+
+        val descriptor = object : FileChooserDescriptor(
+            true, false, false, true, false, false
+        ) {
+            override fun isFileSelectable(file: VirtualFile?): Boolean {
+                return file?.extension?.lowercase() == "jar"
+            }
+        }
+
+        pathField.addBrowseFolderListener(
+            "Select framework.jar",
+            "Choose framework.jar file",
+            ProjectManager.getInstance().defaultProject,
+            descriptor,
+            TextComponentAccessor.TEXT_FIELD_WHOLE_TEXT
+        )
 
         // 第一行：Enable 插件
         val label1 = JLabel("Enable plugin:")
@@ -60,21 +79,20 @@ class PrismConfigurable : Configurable {
 
         c.gridx = 1
         c.weightx = 1.0
-        panel.add(textField, c)
+        panel.add(pathField, c)
 
-        // 将表单面板添加到外层 panel 的 NORTH，让其靠上
         outerPanel.add(panel, BorderLayout.NORTH)
         return outerPanel
     }
 
     override fun isModified(): Boolean {
         val settings = PrismSettings.getInstance()
-        return enableCheckbox.isSelected != settings.enabled ||
-                textField.text != settings.frameworkJarPath
+        return enableCheckbox.isSelected != settings.enabled || pathField.text != settings.frameworkJarPath
     }
 
     override fun apply() {
-        val path = textField.text
+        val path = pathField.text
+
         if (enableCheckbox.isSelected && path.isNotBlank()) {
             val file = File(path)
             if (!file.exists()) {
