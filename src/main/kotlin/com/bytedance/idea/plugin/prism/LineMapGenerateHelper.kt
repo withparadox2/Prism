@@ -1,5 +1,6 @@
 package com.bytedance.idea.plugin.prism
 
+import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.application.runReadAction
 import com.intellij.psi.PsiArrayType
 import com.intellij.psi.PsiDocumentManager
@@ -14,7 +15,10 @@ import org.jf.dexlib2.dexbacked.DexBackedDexFile
 import org.jf.dexlib2.iface.ClassDef
 import org.jf.dexlib2.iface.MultiDexContainer
 import org.jf.dexlib2.iface.debug.LineNumber
+import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 data class MethodLineInfo(
     val sourceStart: Int,
@@ -35,8 +39,112 @@ private val primitiveMapping = mapOf(
     "void" to "V"
 )
 
+/**
+ * 本地磁盘缓存管理器，用于持久化 jar 中解析出的类方法行号映射。
+ *
+ * 缓存结构:
+ *   <IDE_SYSTEM>/prism-cache/<jarFileName>-<jarSize>-<jarLastModified>/
+ *       <className>.bin   -- 二进制格式存储 Map<String, Pair<Int,Int>>
+ *
+ * 缓存失效策略：通过 jar 的文件大小 + lastModified 时间戳联合作为版本标识，
+ * jar 文件发生变化时会自动使用新的缓存目录，旧缓存不会被主动读取。
+ */
+private object DiskCache {
+
+    private const val CACHE_DIR_NAME = "prism-cache"
+    private const val MAGIC = 0x505249534DL // "PRISM"
+    private const val VERSION = 1
+
+    /**
+     * 获取缓存根目录：<IDE system path>/prism-cache/
+     */
+    private fun getCacheRoot(): File {
+        return File(PathManager.getSystemPath(), CACHE_DIR_NAME)
+    }
+
+    /**
+     * 根据 jar 文件属性生成版本化的缓存子目录。
+     * 目录名格式: <jarFileName>-<fileSize>-<lastModified>
+     * 当 jar 更新后，size 或 lastModified 变化，自然切换到新目录。
+     */
+    private fun getJarCacheDir(jarFile: File): File {
+        val dirName = "${jarFile.name}-${jarFile.length()}-${jarFile.lastModified()}"
+        return File(getCacheRoot(), dirName)
+    }
+
+    /**
+     * 获取某个类对应的缓存文件路径。
+     * 类名中的 '.' 和 '/' 替换为 '_' 避免路径问题。
+     */
+    private fun getCacheFile(jarFile: File, className: String): File {
+        val safeClassName = className.replace('.', '_').replace('/', '_')
+        return File(getJarCacheDir(jarFile), "$safeClassName.bin")
+    }
+
+    /**
+     * 从磁盘缓存读取类的方法行号映射。
+     * @return 缓存命中时返回 Map；缓存不存在或格式异常时返回 null。
+     */
+    fun load(jarFile: File, className: String): Map<String, Pair<Int, Int>>? {
+        val cacheFile = getCacheFile(jarFile, className)
+        if (!cacheFile.exists()) return null
+
+        return try {
+            DataInputStream(cacheFile.inputStream().buffered()).use { dis ->
+                val magic = dis.readLong()
+                val version = dis.readInt()
+                if (magic != MAGIC || version != VERSION) return null
+
+                val count = dis.readInt()
+                val map = LinkedHashMap<String, Pair<Int, Int>>(count)
+                repeat(count) {
+                    val key = dis.readUTF()
+                    val start = dis.readInt()
+                    val end = dis.readInt()
+                    map[key] = start to end
+                }
+                map
+            }
+        } catch (e: Exception) {
+            LOG.warn("Prism: failed to load disk cache for $className", e)
+            // 缓存损坏则删除
+            cacheFile.delete()
+            null
+        }
+    }
+
+    /**
+     * 将类的方法行号映射写入磁盘缓存。
+     */
+    fun save(jarFile: File, className: String, methodMap: Map<String, Pair<Int, Int>>) {
+        try {
+            val cacheFile = getCacheFile(jarFile, className)
+            cacheFile.parentFile?.mkdirs()
+
+            DataOutputStream(cacheFile.outputStream().buffered()).use { dos ->
+                dos.writeLong(MAGIC)
+                dos.writeInt(VERSION)
+                dos.writeInt(methodMap.size)
+                methodMap.forEach { (key, value) ->
+                    dos.writeUTF(key)
+                    dos.writeInt(value.first)
+                    dos.writeInt(value.second)
+                }
+            }
+        } catch (e: Exception) {
+            LOG.warn("Prism: failed to save disk cache for $className", e)
+        }
+    }
+}
+
 class LineMapGenerateHelper {
     private val jarPathToDexContainer = mutableMapOf<String, MultiDexContainer<out DexBackedDexFile>>()
+
+    /**
+     * 内存级缓存: key = "jarPath::className", value = 该类的方法行号映射。
+     * 使用 ConcurrentHashMap 保证线程安全（调试场景可能有并发访问）。
+     */
+    private val runtimeMethodCache = ConcurrentHashMap<String, Map<String, Pair<Int, Int>>>()
 
     fun getMethodLineInfoMap(
         className: String,
@@ -63,19 +171,37 @@ class LineMapGenerateHelper {
     /**
      * @param jarPath 传入 framework.jar 的路径
      * @param targetClassName 目标类名，如 "android.view.View"
+     *
+     * 优化策略（三级缓存）:
+     *   1. 内存缓存（ConcurrentHashMap）—— 同一 session 内零开销命中
+     *   2. 磁盘缓存（二进制文件）—— 跨 session / IDE 重启后快速恢复，无需重新解析 jar
+     *   3. 原始解析（遍历 dex）—— 仅在首次访问时执行，结果同时回写到内存 + 磁盘
      */
     private fun getRuntimeMethodLineMap(
         jarPath: String?,
         targetClassName: String
     ): Map<String, Pair<Int, Int>> {
-        val methodMap: MutableMap<String, Pair<Int, Int>> = mutableMapOf()
-        jarPath ?: return methodMap
+        jarPath ?: return emptyMap()
 
+        val cacheKey = "$jarPath::$targetClassName"
+
+        // --- 第 1 级：内存缓存 ---
+        runtimeMethodCache[cacheKey]?.let { return it }
+
+        val file = File(jarPath)
+        if (!file.exists()) return emptyMap()
+
+        // --- 第 2 级：磁盘缓存 ---
+        DiskCache.load(file, targetClassName)?.let { cached ->
+            LOG.info("Prism: disk cache hit for $targetClassName")
+            runtimeMethodCache[cacheKey] = cached
+            return cached
+        }
+
+        // --- 第 3 级：原始解析 ---
+        val methodMap: MutableMap<String, Pair<Int, Int>> = mutableMapOf()
         val dexClassName = "L" + targetClassName.replace(".", "/") + ";"
         try {
-            val file = File(jarPath)
-            if (!file.exists()) return methodMap
-
             val container = jarPathToDexContainer[jarPath] ?: DexFileFactory.loadDexContainer(
                 file,
                 Opcodes.getDefault()
@@ -91,6 +217,10 @@ class LineMapGenerateHelper {
                 for (classDef in dexEntry.dexFile.classes) {
                     if (classDef.type == dexClassName) {
                         parseClassMethods(classDef, methodMap)
+                        // 解析完成，回写到内存缓存 + 磁盘缓存
+                        runtimeMethodCache[cacheKey] = methodMap
+                        DiskCache.save(file, targetClassName, methodMap)
+                        LOG.info("Prism: parsed and cached $targetClassName (${methodMap.size} methods)")
                         return methodMap
                     }
                 }
@@ -98,6 +228,9 @@ class LineMapGenerateHelper {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+
+        // 即使未找到目标类，也缓存空结果，避免反复遍历
+        runtimeMethodCache[cacheKey] = methodMap
         return methodMap
     }
 
